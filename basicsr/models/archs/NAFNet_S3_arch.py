@@ -1,0 +1,166 @@
+# ------------------------------------------------------------------------
+# Copyright (c) 2022 megvii-model. All Rights Reserved.
+# ------------------------------------------------------------------------
+
+'''
+Simple Baselines for Image Restoration
+
+@article{chen2022simple,
+  title={Simple Baselines for Image Restoration},
+  author={Chen, Liangyu and Chu, Xiaojie and Zhang, Xiangyu and Sun, Jian},
+  journal={arXiv preprint arXiv:2204.04676},
+  year={2022}
+}
+'''
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from basicsr.models.archs.local_arch import Local_Base
+from basicsr.models.archs.Baseline_arch import NAFBlock
+
+class SimpleGate(nn.Module):
+    def forward(self, x):
+        x1, x2 = x.chunk(2, dim=1)
+        return x1 * x2
+
+class EdgeGuidedAttention(nn.Module):
+    def __init__(self, in_channels):
+        super(EdgeGuidedAttention, self).__init__()
+
+        self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+
+        self.attention_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+
+    def forward(self, x, res):
+        features = self.conv1(x)
+
+        attention_weights = torch.sigmoid(self.attention_conv(res))
+
+        guided_features = features * attention_weights
+
+        return guided_features
+
+
+class Fusion(nn.Module):
+    def __init__(self, in_channel, n_feat):
+        super(Fusion, self).__init__()
+
+        E = [
+            nn.Conv2d(in_channel, n_feat, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(n_feat, n_feat * 2, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(n_feat * 2, n_feat, kernel_size=3, padding=1)
+        ]
+        self.intro_x = nn.Sequential(
+            *E
+        )
+        self.intro_res = nn.Sequential(
+            *E
+        )
+        self.EGA = EdgeGuidedAttention(n_feat)
+
+    def forward(self, x, res):
+        x = self.intro_x(x)
+        res = self.intro_res(res)
+
+        output = self.EGA(x, res)
+
+        return output
+
+
+class NAFNetS3(nn.Module):
+
+    def __init__(self, img_channel=3, width=32, middle_blk_num=1, enc_blk_nums=[1,1,1,28], dec_blk_nums=[1,1,1,1]):
+        super().__init__()
+        self.ending = nn.Conv2d(in_channels=width, out_channels=img_channel, kernel_size=3, padding=1, stride=1,
+                                groups=1,
+                                bias=True)
+
+        self.encoders = nn.ModuleList()
+        self.decoders = nn.ModuleList()
+        self.middle_blks = nn.ModuleList()
+        self.ups = nn.ModuleList()
+        self.downs = nn.ModuleList()
+        self.fusion = Fusion(img_channel, width)
+        chan = width
+        for num in enc_blk_nums:
+            self.encoders.append(
+                nn.Sequential(
+                    *[NAFBlock(chan) for _ in range(num)]
+                )
+            )
+            self.downs.append(
+                nn.Conv2d(chan, 2 * chan, 2, 2)
+            )
+            chan = chan * 2
+
+        self.middle_blks = \
+            nn.Sequential(
+                *[NAFBlock(chan) for _ in range(middle_blk_num)]
+            )
+
+        for num in dec_blk_nums:
+            self.ups.append(
+                nn.Sequential(
+                    nn.Conv2d(chan, chan * 2, 1, bias=False),
+                    nn.PixelShuffle(2)
+                )
+            )
+            chan = chan // 2
+            self.decoders.append(
+                nn.Sequential(
+                    *[NAFBlock(chan) for _ in range(num)]
+                )
+            )
+
+        self.padder_size = 2 ** len(self.encoders)
+    def forward(self, inp):
+        inp0, inp1 = torch.chunk(inp, 2, 0)
+        B, C, H, W = inp0.shape
+        inp0 = self.check_image_size(inp0)
+        inp1 = self.check_image_size(inp1)
+        x = self.fusion(inp0, inp1)
+
+        encs = []
+
+        for encoder, down in zip(self.encoders, self.downs):
+            x = encoder(x)
+            encs.append(x)
+            x = down(x)
+
+        x = self.middle_blks(x)
+        middle_x = x
+        for decoder, up, enc_skip in zip(self.decoders, self.ups, encs[::-1]):
+            x = up(x)
+            x = x + enc_skip
+            x = decoder(x)
+
+        x = self.ending(x)
+        # middle_x = x
+        x = x + inp0
+
+        # return x[:, :, :H, :W], self.beta * middle_x, self.gamma * ending
+        return x[:, :, :H, :W], middle_x
+
+    def check_image_size(self, x):
+        _, _, h, w = x.size()
+        mod_pad_h = (self.padder_size - h % self.padder_size) % self.padder_size
+        mod_pad_w = (self.padder_size - w % self.padder_size) % self.padder_size
+        x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h))
+        return x
+
+
+class NAFNetLocalS3(Local_Base, NAFNetS3):
+    def __init__(self, *args, train_size=(2, 3, 256, 256), fast_imp=False, **kwargs):
+        Local_Base.__init__(self)
+        NAFNetS3.__init__(self, *args, **kwargs)
+
+        N, C, H, W = train_size
+        base_size = (int(H * 1.5), int(W * 1.5))
+
+        self.eval()
+        with torch.no_grad():
+            self.convert(base_size=base_size, train_size=train_size, fast_imp=fast_imp)

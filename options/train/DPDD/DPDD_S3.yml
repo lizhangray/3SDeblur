@@ -1,0 +1,132 @@
+# ------------------------------------------------------------------------
+# Copyright (c) 2022 megvii-model. All Rights Reserved.
+# ------------------------------------------------------------------------
+# Modified from BasicSR (https://github.com/xinntao/BasicSR)
+# Copyright 2018-2020 BasicSR Authors
+# ------------------------------------------------------------------------
+# general settings
+name: DPDD_Stage3
+model_type: ImageRestorationS3Model
+scale: 1
+num_gpu: 8
+manual_seed: 42
+
+datasets:
+  train:
+    name: DDPD-train
+    type: PairedImageDataset
+    dataroot_gt: /mnt/sda1/shallowdream/dataset/dd_dp_dataset_png/train_c/target
+    dataroot_lq: /mnt/sda1/shallowdream/dataset/dd_dp_dataset_png/train_c/source
+
+    filename_tmpl: '{}'
+    io_backend:
+      type: disk
+
+    gt_size: 512
+    use_flip: true
+    use_rot: true
+
+    # data loader
+    use_shuffle: true
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 16
+    accumulation_step: 4
+    dataset_enlarge_ratio: 1
+    prefetch_mode: ~
+
+  val:
+    name: DDPD-test
+    type: PairedImageDataset
+    dataroot_gt: /mnt/sda1/shallowdream/dataset/dd_dp_dataset_png/test_c/target
+    dataroot_lq: /mnt/sda1/shallowdream/dataset/dd_dp_dataset_png/test_c/source
+    io_backend:
+      type: disk
+
+network_g_S1:
+  type: NAFNetLocalS1
+  width: 32
+  enc_blk_nums: [1, 1, 1, 28]
+  middle_blk_num: 1
+  dec_blk_nums: [1, 1, 1, 1]
+
+network_g_S2:
+  type: DFD
+
+network_g_S3:
+  type: NAFNetLocalS3
+  width: 32
+  enc_blk_nums: [1, 1, 1, 28]
+  middle_blk_num: 1
+  dec_blk_nums: [1, 1, 1, 1]
+
+
+# path
+path:
+  pretrain_network_g_S1: pretrain_model/DPDD_Stage1.pth
+  pretrain_network_g_S2: pretrain_model/DPDD_Stage2.pth
+  pretrain_network_g_S3: ~
+  strict_load_g: True
+  resume_state: ~
+  ignore_resume_networks: network_g_S1
+
+train:
+  optim_g:
+    type: AdamW
+    lr: !!float 1e-3
+    weight_decay: !!float 1e-3
+    betas: [0.9, 0.9]
+
+  scheduler:
+    type: TrueCosineAnnealingLR
+    T_max: 120000
+    eta_min: !!float 1e-6
+
+  total_iter: 120000
+  warmup_iter: -1 # no warm up
+
+  # losses
+  pixel_opt:
+    type: PSNRLoss
+    loss_weight: 1
+    reduction: mean
+  fft_opt:
+    type: FFTLoss
+    loss_weight: 0.1
+    reduction: mean
+  kd_loss_opt:
+    type: KDLoss
+    loss_weight: 0.05
+    temperature: 0.15
+
+# validation settings
+val:
+  val_freq: !!float 5e3
+  save_img: true
+
+
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
+    lpips:
+      type: calculate_lpips
+      crop_border: 0
+
+# logging settings
+logger:
+  print_freq: 100
+  save_checkpoint_freq: !!float 5e3
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500
