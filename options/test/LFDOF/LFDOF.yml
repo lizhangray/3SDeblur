@@ -5,7 +5,7 @@
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
 # general settings
-name: Ablation_NAFNet-LFDOF
+name: LFDOF-test
 model_type: ImageRestorationTestModel
 scale: 1
 num_gpu: 8 # set num_gpu: 0 for cpu mode
@@ -17,10 +17,8 @@ datasets:
     name: LFDOF-test
     type: PairedImageDataset
 
-#    dataroot_gt: /mnt/sda1/shallowdream/dataset/LFDOF/test_data/ground_truth
-#    dataroot_lq: /mnt/sda1/shallowdream/dataset/LFDOF/test_data/input
-    dataroot_gt: /mnt/sda1/shallowdream/dataset/dd_dp_dataset_png/test_c/target/
-    dataroot_lq: /mnt/sda1/shallowdream/dataset/dd_dp_dataset_png/test_c/source/
+    dataroot_gt: /mnt/sda1/shallowdream/dataset/LFDOF/test_data/ground_truth
+    dataroot_lq: /mnt/sda1/shallowdream/dataset/LFDOF/test_data/input
 
     filename_tmpl: '{}'
     io_backend:
@@ -28,19 +26,19 @@ datasets:
 
 # network structures
 network_g:
-  type: NAFNetLocalJoint
+  type: NAFNetLocalS3
   width: 32
   enc_blk_nums: [1, 1, 1, 28]
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
 
-network_cpen:
-  type: LTR
+network_g_S2:
+  type: DFD
 
 # path
 path:
-  pretrain_network_g: pretrain_model/net_g_latest.pth
-  pretrain_network_cpen: pretrain_model/net_cpen_latest.pth
+  pretrain_network_g_S2: pretrain_model/LFDOF_Stage2.pth
+  pretrain_network_g_S3: pretrain_model/LFDOF_Stage3.pth
   strict_load_g: False
   ignore_resume_networks: network_cpen
 

@@ -70,7 +70,7 @@ class ImageRestorationTestModel(BaseModel):
         num_row = (h - 1) // crop_size_h + 1
         num_col = (w - 1) // crop_size_w + 1
 
-        import mathscreen
+        import math
         step_j = crop_size_w if num_col == 1 else math.ceil((w - crop_size_w) / (num_col - 1) - 1e-8)
         step_i = crop_size_h if num_row == 1 else math.ceil((h - crop_size_h) / (num_row - 1) - 1e-8)
 

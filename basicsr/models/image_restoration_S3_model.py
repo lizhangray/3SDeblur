@@ -302,7 +302,7 @@ class ImageRestorationS3Model(BaseModel):
                 j = i + m
                 if j >= n:
                     j = n
-                pred, _ = self.net_g(torch.cat([self.lq[i:j], self.net_dfd(self.lq)], dim=0))
+                pred, _ = self.net_g(torch.cat([self.lq[i:j], self.net_dfd(self.lq[i:j])], dim=0))
                 if isinstance(pred, list):
                     pred = pred[-1]
                 outs.append(pred.detach().cpu())
